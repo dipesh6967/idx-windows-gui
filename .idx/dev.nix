@@ -16,89 +16,94 @@
     qemu = ''
       set -e
 
-      # =========================
-      # One-time cleanup
-      # =========================
-      if [ ! -f /home/user/.cleanup_done ]; then
-        rm -rf /home/user/.gradle/* /home/user/.emu/* || true
-        find /home/user -mindepth 1 -maxdepth 1 \
-          ! -name 'idx-windows-gui' \
-          ! -name '.cleanup_done' \
-          ! -name '.*' \
-          -exec rm -rf {} + || true
-        touch /home/user/.cleanup_done
-      fi
-
-      # =========================
-      # Paths
-      # =========================
+      # 1. Setup Directories
       VM_DIR="$HOME/qemu"
       RAW_DISK="$VM_DIR/windows.qcow2"
       WIN_ISO="$VM_DIR/automic11.iso"
       VIRTIO_ISO="$VM_DIR/virtio-win.iso"
       NOVNC_DIR="$HOME/noVNC"
       OVMF_DIR="$VM_DIR/ovmf"
-      OVMF_CODE="$OVMF_DIR/OVMF_CODE.fd"
-      OVMF_VARS="$OVMF_DIR/OVMF_VARS.fd"
+      mkdir -p "$OVMF_DIR" "$VM_DIR"
 
-      mkdir -p "$VM_DIR" "$OVMF_DIR"
-
-      # =========================
-      # Download OVMF firmware
-      # =========================
-      if [ ! -f "$OVMF_CODE" ]; then
-        wget -O "$OVMF_CODE" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_CODE.fd
-      fi
-      if [ ! -f "$OVMF_VARS" ]; then
-        wget -O "$OVMF_VARS" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_VARS.fd
+      # 2. Download Firmware (UEFI)
+      if [ ! -f "$OVMF_DIR/OVMF_CODE.fd" ]; then
+        wget -O "$OVMF_DIR/OVMF_CODE.fd" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_CODE.fd
+        wget -O "$OVMF_DIR/OVMF_VARS.fd" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_VARS.fd
       fi
 
-      # =========================
-      # Download ISOs
-      # =========================
+      # 3. Download Windows & Drivers ISOs
       if [ ! -f "$WIN_ISO" ]; then
         wget -O "$WIN_ISO" https://github.com/kmille36/idx-windows-gui/releases/download/1.0/automic11.iso
       fi
-
       if [ ! -f "$VIRTIO_ISO" ]; then
         wget -O "$VIRTIO_ISO" https://github.com/kmille36/idx-windows-gui/releases/download/1.0/virtio-win-0.1.271.iso
       fi
 
-      # =========================
-      # Create 100GB Disk (New logic)
-      # =========================
+      # 4. Create 100GB Disk (New logic - No download)
       if [ ! -f "$RAW_DISK" ]; then
-        echo "💽 Creating 100GB virtual disk..."
+        echo "Creating 100GB virtual disk..."
         qemu-img create -f qcow2 "$RAW_DISK" 100G
-      else
-        echo "✅ QCOW2 disk already exists."
       fi
 
-      # =========================
-      # Smart Boot Logic
-      # =========================
-      # If disk is empty or very small, boot from ISO (d). Otherwise, boot from Disk (c).
-      BOOT_FLAG="c"
-      if [ ! -s "$RAW_DISK" ] || [ $(stat -c%s "$RAW_DISK") -lt 1048576 ]; then
-        echo "🚀 Fresh disk detected. Setting boot to ISO..."
-        BOOT_FLAG="d"
-      fi
-
-      # =========================
-      # Clone noVNC
-      # =========================
+      # 5. Clone noVNC
       if [ ! -d "$NOVNC_DIR/.git" ]; then
         git clone https://github.com/novnc/noVNC.git "$NOVNC_DIR"
       fi
 
-      # =========================
-      # Start QEMU
-      # =========================
-      echo "⚙️ Starting QEMU with 100GB Disk..."
+      # 6. Smart Boot Logic
+      BOOT_FLAG="c"
+      if [ $(stat -c%s "$RAW_DISK") -lt 2097152 ]; then
+        BOOT_FLAG="d"
+      fi
+
+      # 7. Start QEMU (FIXED: Auto-Driver Internet + 100GB Disk)
+      # Using 'e1000e' so Windows sees the internet automatically.
+      # Using 'ide' for the disk so Windows sees the 100GB drive without loading drivers.
+      echo "Starting Windows VM..."
       nohup qemu-system-x86_64 \
         -enable-kvm \
-        -cpu host,+topoext,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough,+pae,+nx,kvm=on,+svm \
+        -cpu host,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough \
         -smp 8,cores=8 \
+        -m 28672 \
+        -M q35,usb=on \
+        -device usb-tablet \
+        -vga virtio \
+        -netdev user,id=n0,dns=8.8.8.8,net=10.0.2.0/24 \
+        -device e1000e,netdev=n0 \
+        -boot "$BOOT_FLAG" \
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF_DIR/OVMF_CODE.fd" \
+        -drive if=pflash,format=raw,file="$OVMF_DIR/OVMF_VARS.fd" \
+        -drive file="$RAW_DISK",format=qcow2,if=ide \
+        -cdrom "$WIN_ISO" \
+        -vnc :0 -display none > /tmp/qemu.log 2>&1 &
+
+      # 8. Start Networking Tunnels
+      nohup "$NOVNC_DIR/utils/novnc_proxy" --vnc 127.0.0.1:5900 --listen 8888 > /tmp/novnc.log 2>&1 &
+      nohup cloudflared tunnel --no-autoupdate --url http://localhost:8888 > /tmp/cloudflared.log 2>&1 &
+
+      sleep 10
+      URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
+      echo "========================================="
+      echo "🌍 Windows VM is ready!"
+      echo "🔗 URL: $URL/vnc.html"
+      echo "💾 Disk: 100GB SSD"
+      echo "🌐 Internet: Automatic (Intel e1000e)"
+      echo "========================================="
+
+      while true; do sleep 60; done
+    '';
+  };
+
+  idx.previews = {
+    enable = true;
+    previews = {
+      qemu = {
+        manager = "web";
+        command = [ "bash" "-lc" "echo 'VM Running'" ];
+      };
+    };
+  };
+}        -smp 8,cores=8 \
         -M q35,usb=on \
         -device usb-tablet \
         -m 28672 \
