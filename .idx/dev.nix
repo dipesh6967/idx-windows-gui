@@ -1,104 +1,95 @@
-{ pkgs, ... }: {
-  channel = "stable-24.11";
-
-  packages = [
-    pkgs.qemu
-    pkgs.htop
-    pkgs.cloudflared
-    pkgs.coreutils
-    pkgs.gnugrep
-    pkgs.wget
-    pkgs.git
-    pkgs.python3
-  ];
-
-  idx.workspace.onStart = {
-    qemu = ''
-      set -e
-
-      # =========================
-      # One-time cleanup
-      # =========================
-      if [ ! -f /home/user/.cleanup_done ]; then
-        rm -rf /home/user/.gradle/* /home/user/.emu/* || true
-        find /home/user -mindepth 1 -maxdepth 1 \
-          ! -name 'idx-windows-gui' \
-          ! -name '.cleanup_done' \
-          ! -name '.*' \
-          -exec rm -rf {} + || true
-        touch /home/user/.cleanup_done
-      fi
-
-      # =========================
+# =========================
       # Paths
       # =========================
 
-      SKIP_QCOW2_DOWNLOAD=0
+      # Set this to 1 if you want to create a fresh 100GB disk instead of downloading one
+      SKIP_QCOW2_DOWNLOAD=1 
 
       VM_DIR="$HOME/qemu"
       RAW_DISK="$VM_DIR/windows.qcow2"
       WIN_ISO="$VM_DIR/automic11.iso"
       VIRTIO_ISO="$VM_DIR/virtio-win.iso"
       NOVNC_DIR="$HOME/noVNC"
-
-     
-     OVMF_DIR="$HOME/qemu/ovmf"
-     OVMF_CODE="$OVMF_DIR/OVMF_CODE.fd"
-     OVMF_VARS="$OVMF_DIR/OVMF_VARS.fd"
-
-     mkdir -p "$OVMF_DIR"
-
-     # =========================
-     # Download OVMF firmware if missing
-     # =========================
-     if [ ! -f "$OVMF_CODE" ]; then
-        echo "Downloading OVMF_CODE.fd..."
-        wget -O "$OVMF_CODE" \
-          https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_CODE.fd
-        else
-          echo "OVMF_CODE.fd already exists, skipping download."
-     fi
-
-     if [ ! -f "$OVMF_VARS" ]; then
-       echo "Downloading OVMF_VARS.fd..."
-       wget -O "$OVMF_VARS" \
-         https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_VARS.fd
-     else
-       echo "OVMF_VARS.fd already exists, skipping download."
-     fi
+      
+      OVMF_DIR="$HOME/qemu/ovmf"
+      OVMF_CODE="$OVMF_DIR/OVMF_CODE.fd"
+      OVMF_VARS="$OVMF_DIR/OVMF_VARS.fd"
 
       mkdir -p "$VM_DIR"
-
-      if [ "$SKIP_QCOW2_DOWNLOAD" -ne 1 ]; then
-  if [ ! -f "$RAW_DISK" ]; then
-    echo "Downloading QCOW2 disk..."
-    wget -O "$RAW_DISK" https://bit.ly/45hceMn
-  else
-    echo "QCOW2 disk already exists, skipping download."
-  fi
-else
-  echo "SKIP_QCOW2_DOWNLOAD=1 → QCOW2 logic skipped."
-fi
-      
+      mkdir -p "$OVMF_DIR"
 
       # =========================
-      # Download Windows ISO if missing
+      # 1. Create 100GB Disk (If missing)
       # =========================
-      if [ ! -f "$WIN_ISO" ]; then
-        echo "Downloading Windows ISO..."
-        wget -O "$WIN_ISO" \
-          https://github.com/kmille36/idx-windows-gui/releases/download/1.0/automic11.iso
+      if [ ! -f "$RAW_DISK" ]; then
+        if [ "$SKIP_QCOW2_DOWNLOAD" -eq 1 ]; then
+          echo "💽 Creating 100GB virtual disk..."
+          qemu-img create -f qcow2 "$RAW_DISK" 100G
+        else
+          echo "📥 Downloading QCOW2 disk..."
+          wget -O "$RAW_DISK" https://bit.ly/45hceMn
+        fi
       else
-        echo "Windows ISO already exists, skipping download."
+        echo "✅ Disk already exists, skipping creation/download."
       fi
 
       # =========================
-      # Download VirtIO drivers ISO if missing
+      # 2. Download ISOs & Firmware
       # =========================
+      # (Firmware download logic)
+      if [ ! -f "$OVMF_CODE" ]; then
+         wget -O "$OVMF_CODE" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_CODE.fd
+      fi
+      if [ ! -f "$OVMF_VARS" ]; then
+         wget -O "$OVMF_VARS" https://qemu.weilnetz.de/test/ovmf/usr/share/OVMF/OVMF_VARS.fd
+      fi
+
+      # (Windows ISO download logic)
+      if [ ! -f "$WIN_ISO" ]; then
+        echo "📥 Downloading Windows ISO..."
+        wget -O "$WIN_ISO" https://github.com/kmille36/idx-windows-gui/releases/download/1.0/automic11.iso
+      fi
+
+      # (VirtIO ISO download logic)
       if [ ! -f "$VIRTIO_ISO" ]; then
-        echo "Downloading VirtIO drivers ISO..."
-        wget -O "$VIRTIO_ISO" \
-          https://github.com/kmille36/idx-windows-gui/releases/download/1.0/virtio-win-0.1.271.iso
+        echo "📥 Downloading VirtIO drivers..."
+        wget -O "$VIRTIO_ISO" https://github.com/kmille36/idx-windows-gui/releases/download/1.0/virtio-win-0.1.271.iso
+      fi
+
+      # =========================
+      # 3. Determine Boot Order
+      # =========================
+      # If the disk was just created (fresh), boot from CD-ROM (d) first.
+      # Otherwise, boot from Hard Disk (c).
+      BOOT_DEVICE="c"
+      if [ ! -s "$RAW_DISK" ] || [ $(stat -c%s "$RAW_DISK") -lt 2000000 ]; then
+         echo "🚀 Fresh disk detected. Booting from ISO..."
+         BOOT_DEVICE="d"
+      fi
+
+      # =========================
+      # 4. Start QEMU
+      # =========================
+      echo "⚙️ Starting QEMU with 100GB disk..."
+      nohup qemu-system-x86_64 \
+        -enable-kvm \
+        -cpu host,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough \
+        -smp 8,cores=8 \
+        -M q35,usb=on \
+        -device usb-tablet \
+        -m 28672 \
+        -vga virtio \
+        -net nic,netdev=n0,model=virtio-net-pci \
+        -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
+        -boot "$BOOT_DEVICE" \
+        -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+        -drive if=pflash,format=raw,file="$OVMF_VARS" \
+        -drive file="$RAW_DISK",format=qcow2,if=virtio \
+        -cdrom "$WIN_ISO" \
+        -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
+        -vnc :0 \
+        -display none \
+        > /tmp/qemu.log 2>&1 &          https://github.com/kmille36/idx-windows-gui/releases/download/1.0/virtio-win-0.1.271.iso
       else
         echo "VirtIO ISO already exists, skipping download."
       fi
