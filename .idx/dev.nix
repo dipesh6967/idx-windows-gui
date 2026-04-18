@@ -33,6 +33,8 @@
       # Paths
       # =========================
 
+      SKIP_QCOW2_DOWNLOAD=0
+
       VM_DIR="$HOME/qemu"
       RAW_DISK="$VM_DIR/windows.qcow2"
       WIN_ISO="$VM_DIR/automic11.iso"
@@ -43,7 +45,7 @@
       OVMF_CODE="$OVMF_DIR/OVMF_CODE.fd"
       OVMF_VARS="$OVMF_DIR/OVMF_VARS.fd"
 
-      mkdir -p "$OVMF_DIR" "$VM_DIR"
+      mkdir -p "$OVMF_DIR"
 
       # =========================
       # Download OVMF firmware if missing
@@ -64,6 +66,19 @@
         echo "OVMF_VARS.fd already exists, skipping download."
       fi
 
+      mkdir -p "$VM_DIR"
+
+      if [ "$SKIP_QCOW2_DOWNLOAD" -ne 1 ]; then
+        if [ ! -f "$RAW_DISK" ]; then
+          echo "Downloading QCOW2 disk..."
+          wget -O "$RAW_DISK" https://bit.ly/45hceMn
+        else
+          echo "QCOW2 disk already exists, skipping download."
+        fi
+      else
+        echo "SKIP_QCOW2_DOWNLOAD=1 → QCOW2 logic skipped."
+      fi
+      
       # =========================
       # Download Windows ISO if missing
       # =========================
@@ -98,13 +113,22 @@
       fi
 
       # =========================
-      # Create 100GB QCOW2 disk if missing (New logic - No download)
+      # Create 100GB QCOW2 disk if missing
       # =========================
       if [ ! -f "$RAW_DISK" ]; then
-        echo "Creating 100GB virtual disk..."
+        echo "💽 Creating 100GB virtual disk..."
         qemu-img create -f qcow2 "$RAW_DISK" 100G
       else
         echo "QCOW2 disk already exists, skipping creation."
+      fi
+
+      # =========================
+      # Windows-specific boot parameters
+      # =========================
+      BOOT_ORDER="order=c,menu=on"
+      if [ ! -s "$RAW_DISK" ] || [ $(stat -c%s "$RAW_DISK") -lt 1048576 ]; then
+        echo "🚀 First boot - installing Windows from ISO"
+        BOOT_ORDER="order=d,menu=on"
       fi
 
       # =========================
@@ -122,7 +146,7 @@
         -vga virtio \
         -net nic,netdev=n0,model=virtio-net-pci \
         -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
-        -boot c \
+        -boot "$BOOT_ORDER" \
         -device virtio-serial-pci \
         -device virtio-rng-pci \
         -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
@@ -191,58 +215,6 @@
       terminal = {
         manager = "web";
         command = [ "bash" ];
-      };
-    };
-  }; 
-}        manager = "web";
-        command = [ "bash" "-lc" "echo 'VM Running'" ];
-      };
-    };
-  };
-}        -smp 8,cores=8 \
-        -M q35,usb=on \
-        -device usb-tablet \
-        -m 28672 \
-        -device virtio-balloon-pci \
-        -vga virtio \
-        -net nic,netdev=n0,model=virtio-net-pci \
-        -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
-        -boot "$BOOT_FLAG" \
-        -device virtio-serial-pci \
-        -device virtio-rng-pci \
-        -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-        -drive if=pflash,format=raw,file="$OVMF_VARS" \
-        -drive file="$RAW_DISK",format=qcow2,if=virtio \
-        -cdrom "$WIN_ISO" \
-        -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
-        -vnc :0 \
-        -display none \
-        > /tmp/qemu.log 2>&1 &
-
-      # =========================
-      # Start Services (noVNC & Tunnel)
-      # =========================
-      nohup "$NOVNC_DIR/utils/novnc_proxy" --vnc 127.0.0.1:5900 --listen 8888 > /tmp/novnc.log 2>&1 &
-      nohup cloudflared tunnel --no-autoupdate --url http://localhost:8888 > /tmp/cloudflared.log 2>&1 &
-
-      sleep 10
-      if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
-        URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
-        echo "========================================="
-        echo " 🌍 Windows VM Ready: $URL/vnc.html"
-        echo "========================================="
-      fi
-
-      while true; do sleep 60; done
-    '';
-  };
-
-  idx.previews = {
-    enable = true;
-    previews = {
-      qemu = {
-        manager = "web";
-        command = ["bash" "-lc" "echo 'VM Running'"];
       };
     };
   };
