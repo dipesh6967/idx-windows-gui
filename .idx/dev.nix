@@ -89,7 +89,7 @@
       if [ ! -f "$WIN_ISO" ]; then
         echo "Downloading Windows ISO..."
         wget -O "$WIN_ISO" \
-          https://archive.org/download/windows-11-iot-enterprise-ltsc-2024/en-us_windows_11_iot_enterprise_ltsc_2024_x64_dvd_f6b14814.iso
+          https://github.com/win10lite/download/releases/download/download/Windows.10.Lite.Edition.19H2.x64.iso
       else
         echo "Windows ISO already exists, skipping download."
       fi
@@ -123,7 +123,7 @@
       nohup qemu-system-x86_64 \
         -enable-kvm \
         -cpu host,+topoext,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough,+pae,+nx,kvm=on,+svm \
-        -smp 4,cores=4 \
+        -smp 6,cores=6 \
         -M q35,usb=on \
         -device usb-tablet \
         -m 24,576 \
