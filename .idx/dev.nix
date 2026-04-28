@@ -93,7 +93,7 @@
       if [ ! -f "$WIN_ISO" ]; then
         echo "Downloading Windows ISO..."
         wget -O "$WIN_ISO" \
-          https://github.com/win10lite/download/releases/download/download/Windows.10.Lite.Edition.19H2.x64.iso
+          https://github.com/kmille36/idx-windows-gui/releases/download/1.0/automic11.iso
       else
         echo "Windows ISO already exists, skipping download."
       fi
@@ -125,28 +125,29 @@
       # =========================
       echo "Starting QEMU..."
       nohup qemu-system-x86_64 \
-        -enable-kvm \
-        -cpu host,+topoext,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough,+pae,+nx,kvm=on,+svm \
-        -smp 6,cores=6 \
-        -M q35,usb=on \
-        -device usb-tablet \
-        -m 24,576 \
-        -device virtio-balloon-pci \
-        -vga virtio \
-        -net nic,netdev=n0,model=virtio-net-pci \
-        -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
-        -boot c \
-        -device virtio-serial-pci \
-        -device virtio-rng-pci \
-        -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
-        -drive if=pflash,format=raw,file="$OVMF_VARS" \
-        -drive file="$RAW_DISK",format=qcow2,if=virtio \
-        -cdrom "$WIN_ISO" \
-        -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
-        -uuid e47ddb84-fb4d-46f9-b531-14bb15156336 \
-        -vnc :0 \
-        -display none \
-        > /tmp/qemu.log 2>&1 &
+  -enable-kvm \
+  -cpu host,+topoext,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough,+pae,+nx,kvm=on,+svm \
+  -smp 6,cores=6 \
+  -M q35,usb=on \
+  -device usb-tablet \
+  -m 24576 \
+  -device virtio-balloon-pci \
+  -vga virtio \
+  -net nic,netdev=n0,model=virtio-net-pci \
+  -netdev user,id=n0,hostfwd=tcp::3389-:3389 \
+  -boot c \
+  -device virtio-serial-pci \
+  -device virtio-rng-pci \
+  -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
+  -drive if=pflash,format=raw,file="$OVMF_VARS" \
+  -drive file="$RAW_DISK",format=qcow2,if=virtio \
+  -cdrom "$WIN_ISO" \
+  -drive file="$VIRTIO_ISO",media=cdrom,if=ide \
+  -uuid e47ddb84-fb4d-46f9-b531-14bb15156336 \
+  -vnc :0 \
+  -display none \
+  > /tmp/qemu.log 2>&1 &
+
 
       # =========================
       # Start noVNC on port 8888
@@ -171,10 +172,10 @@
       if grep -q "trycloudflare.com" /tmp/cloudflared.log; then
         URL=$(grep -o "https://[a-z0-9.-]*trycloudflare.com" /tmp/cloudflared.log | head -n1)
         echo "========================================="
-        echo " 🌍 Windows VM + noVNC ready:"
+        echo " 🌍 Windows 11 QEMU + noVNC ready:"
         echo "     $URL/vnc.html"
+        echo "     $URL/vnc.html" > /home/user/idx-windows-gui/noVNC-URL.txt
         echo "========================================="
-        echo "$URL/vnc.html" > /home/user/idx-windows-gui/noVNC-URL.txt
       else
         echo "❌ Cloudflared tunnel failed"
       fi
