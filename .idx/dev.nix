@@ -93,7 +93,7 @@
       if [ ! -f "$WIN_ISO" ]; then
         echo "Downloading Windows ISO..."
         wget -O "$WIN_ISO" \
-          https://github.com/win10lite/download/releases/download/download/Windows.10.Lite.Edition.19H2.x64.iso
+          https://github.com/kmille36/idx-windows-gui/releases/download/1.0/automic11.iso
       else
         echo "Windows ISO already exists, skipping download."
       fi
@@ -127,10 +127,10 @@
       nohup qemu-system-x86_64 \
   -enable-kvm \
   -cpu host,+topoext,hv_relaxed,hv_spinlocks=0x1fff,hv-passthrough,+pae,+nx,kvm=on,+svm \
-  -smp 6,cores=6 \
+  -smp 4,cores=4 \
   -M q35,usb=on \
   -device usb-tablet \
-  -m 24576 \
+  -m 16384 \
   -device virtio-balloon-pci \
   -vga virtio \
   -net nic,netdev=n0,model=virtio-net-pci \
